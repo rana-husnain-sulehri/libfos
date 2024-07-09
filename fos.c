@@ -13,7 +13,6 @@ size_t FOS_WriteCallback(void *contents, size_t size, size_t nmemb, void *odata)
         }
         return total_size;
 }
-
 int FOS_Killer(char arg1[], char arg2[]){
         if(arg1 == NULL || arg2 == NULL){
                 exit(EXIT_FAILURE);
@@ -412,7 +411,118 @@ int FOS_LoadUserSecret(const char* _secretfilepath, char* _store_secret){
         }
         return statuscode;
 }
-int FOS_SecurityKey_isConnected(libusb_context* app_contex,SecurityKey_t* _device_key){
+int FOS_SecurityKey_isConnected(libusb_context* app_contex){
+        if( app_contex == NULL) return -1;
+        libusb_device** device_list;
+        int is_device_found = -1;
+    int errcode = -1;
+        errcode = libusb_get_device_list(app_contex, &device_list);
+    if(errcode < 0) {
+        fprintf(stderr, "[E] [libusb_get_device_list] %s\n", libusb_error_name(errcode));
+        return -1;
+    }
+        int device_list_size = errcode;
+        for(ssize_t i = 0; i < device_list_size; i++){
+                struct libusb_device_descriptor device_detail;
+                uint8_t vendor_name[100];
+                uint8_t product_name[100];
+                errcode = libusb_get_device_descriptor(device_list[i],&device_detail);
+                if (errcode < 0) {
+                fprintf(stderr, "[E] [libusb_get_device_descriptor] %s\n", libusb_error_name(errcode));
+                continue;
+                }
+                libusb_device_handle *device_handle = NULL;
+        errcode = libusb_open(device_list[i], &device_handle);
+        if (errcode < 0) {
+            fprintf(stderr, "[E] [libusb_open] %s\n", libusb_error_name(errcode));
+            continue;
+        }
+        int actual_size = libusb_get_string_descriptor_ascii(device_handle, device_detail.iManufacturer, vendor_name, sizeof(vendor_name));
+        if(actual_size < 0){
+                        libusb_close(device_handle);
+            fprintf(stderr, "[E] [libusb_get_string_descriptor_ascii-iVendor] %s\n", libusb_error_name(actual_size));
+            continue;
+                }
+                vendor_name[actual_size] = '\0';
+                actual_size = libusb_get_string_descriptor_ascii(device_handle, device_detail.iProduct, product_name, sizeof(product_name));
+        if(actual_size < 0){
+                        libusb_close(device_handle);
+            fprintf(stderr, "[E] [libusb_get_string_descriptor_ascii-iProduct] %s\n", libusb_error_name(actual_size));
+            continue;
+                }
+                product_name[actual_size] = '\0';
+                #ifdef APP_DEBUG
+                fprintf(stdout,"%s\n",vendor_name);
+                fprintf(stdout,"%s\n",product_name);
+            fprintf(stdout,"%x\n",device_detail.idVendor);
+                fprintf(stdout,"%x\n",device_detail.idProduct );
+                fprintf(stdout,"--------------------------\n");
+                #endif
+                if(strncmp((const char*)vendor_name,FOS_PROTO_VENDOR_STRING,strlen(FOS_PROTO_VENDOR_STRING)) == 0 && strncmp((const char*)product_name,FOS_PROTO_PRODUCT_STRING,strlen(FOS_PROTO_PRODUCT_STRING)) == 0 && device_detail.idVendor == FOS_PROTO_VENDOR_ID && device_detail.idProduct == FOS_PROTO_PRODUCT_ID){
+            #ifdef APP_DEBUG
+                        fprintf(stdout,"DeviceNo: %zd\n",i);
+                        fprintf(stdout,"\tDeviceMajorMinor: [0x%04x:0x%04x] \n",device_detail.idVendor,device_detail.idProduct);
+                        fprintf(stdout,"\tDeviceVendorName: %s\n",vendor_name);
+                        fprintf(stdout,"\tDeviceProductName: %s\n",product_name);
+                        #endif
+                        struct libusb_config_descriptor *config;
+                        errcode = libusb_get_active_config_descriptor(device_list[i], &config);
+            if (errcode < 0) {
+                fprintf(stderr, "[E] [libusb_get_active_config_descriptor] %s\n", libusb_error_name(errcode));
+            }else{
+                                //! Get Configuration
+                                int device_config;
+                                errcode = libusb_get_configuration(device_handle,&device_config);
+                                if(errcode == 0){
+                                        //! Set Configuration if not set
+                                        if(device_config != 1){
+                                            errcode = libusb_set_configuration(device_handle, 1);
+                                                if(errcode != 0) break;
+                                        }
+                                        //! Claim Interface
+                                        errcode = libusb_claim_interface(device_handle, 0);
+                                        if(errcode == 0){
+                                                //! Activate Configuration
+                                                is_device_found = 1;
+                                                for(uint8_t j = 0; j < config->bNumInterfaces; ++j) {
+                                                        const struct libusb_interface *itf = &config->interface[j];
+                                                        for(uint8_t k = 0; k < itf->num_altsetting; ++k) {
+                                                                const struct libusb_interface_descriptor *itf_desc = &itf->altsetting[k];
+                                                                for(int k = 0; k < itf_desc->bNumEndpoints; k++){
+                                                                        const struct libusb_endpoint_descriptor *ep_desc = &itf_desc->endpoint[k];
+                                                                        #ifdef APP_DEBUG
+                                                                        fprintf(stdout,"\nEndPoint Descriptors: ");
+                                                                        fprintf(stdout,"\n\tSize of EndPoint Descriptor: %d", ep_desc->bLength);
+                                                                        fprintf(stdout,"\n\tType of Descriptor: %d", ep_desc->bDescriptorType);
+                                                                        fprintf(stdout,"\n\tEndpoint Address: 0x0%x", ep_desc->bEndpointAddress);
+                                                                        fprintf(stdout,"\n\tMaximum Packet Size: %x", ep_desc->wMaxPacketSize);
+                                                                        fprintf(stdout,"\n\tAttributes applied to Endpoint: %d", ep_desc->bmAttributes);
+                                                                        fprintf(stdout,"\n\tInterval for Polling for data Transfer: %d\n", ep_desc->bInterval);
+                                                                        #endif
+                                                                }
+                                                        }
+                                                }
+                                        }
+                                        errcode = libusb_release_interface(device_handle, 0);
+                                        #ifdef APP_DEBUG
+                                        if (result != LIBUSB_SUCCESS) {
+                                        fprintf(stderr, "Failed to release interface: %s\n", libusb_error_name(result));
+                                        
+                                        }
+                                        #endif
+
+                                }
+                                libusb_free_config_descriptor(config);
+                        }
+                        libusb_close(device_handle);
+                        break;
+        }
+        libusb_close(device_handle);
+        }
+        libusb_free_device_list(device_list,1);
+        return is_device_found;
+}
+int FOS_SecurityKey_isConnected_ex(libusb_context* app_contex,SecurityKey_t* _device_key){
         if(_device_key == NULL || app_contex == NULL) return -1;
         libusb_device** device_list;
         int is_device_found = -1;
@@ -433,10 +543,10 @@ int FOS_SecurityKey_isConnected(libusb_context* app_contex,SecurityKey_t* _devic
                 uint8_t vendor_name[100];
                 uint8_t product_name[100];
                 errcode = libusb_get_device_descriptor(device_list[i],&device_detail);
-        if (errcode < 0) {
-            fprintf(stderr, "[E] [libusb_get_device_descriptor] %s\n", libusb_error_name(errcode));
-            continue;
-        }
+                if (errcode < 0) {
+                fprintf(stderr, "[E] [libusb_get_device_descriptor] %s\n", libusb_error_name(errcode));
+                continue;
+                }
                 libusb_device_handle *device_handle = NULL;
         errcode = libusb_open(device_list[i], &device_handle);
         if (errcode < 0) {
@@ -661,24 +771,27 @@ int FOS_SecurityKey_Authenticate(const char* config_filepath){
                         if(FOS_LoadUserSecret(config_filepath,_lsecret) != -1){
                                 //! SecurityKey Connected?
                     SecurityKey_t security_key;
-                                if(FOS_SecurityKey_isConnected(app_contex,&security_key) != -1){
+                                if(FOS_SecurityKey_isConnected(app_contex) != -1){
                                         if(is_done == false){
-                                                is_done = true;
                                             FOS_DisplayLANConfigurationMenu();
                                         }
-                                        uint8_t request_id[4];
-                                        if(FOS_SecurityKey_QueryKey(&security_key,request_id) != -1){
-                                                char _rsecret[255];
-                                    if(FOS_SecurityKey_CheckResp(&security_key,request_id,_rsecret) != -1){
-                                            if(strcasecmp(_lsecret,_rsecret) == 0){
-                                                                fprintf(stdout, "[I] [SecurityKey Authenticated]\n");
-                                                                is_authenticated = 1;
-                                                                //! Clean Up
-                                                                libusb_exit(app_contex);
-                                                                break;
+                                        if(is_done){
+                                                uint8_t request_id[4];
+                                                FOS_SecurityKey_isConnected_ex(app_contex,&security_key);
+                                                if(FOS_SecurityKey_QueryKey(&security_key,request_id) != -1){
+                                                        char _rsecret[255];
+                                                        if(FOS_SecurityKey_CheckResp(&security_key,request_id,_rsecret) != -1){
+                                                                if(strcasecmp(_lsecret,_rsecret) == 0){
+                                                                        fprintf(stdout, "[I] [SecurityKey Authenticated]\n");
+                                                                        is_authenticated = 1;
+                                                                        //! Clean Up
+                                                                        libusb_exit(app_contex);
+                                                                        break;
+                                                                }
                                                         }
                                                 }
                                         }
+                                        is_done = true;
                                 }
                     }
                         libusb_exit(app_contex);
@@ -694,7 +807,7 @@ void FOS_DisplayLANConfigurationMenu(){
         char script_filepath[100];
         char input_string[24];
         while(1){
-            fprintf(stdout,"-: ThingzEye Firewall Menu :-\n");
+            fprintf(stdout,"\n-: ThingzEye Firewall Menu :-\n");
                 fprintf(stdout,"1) Assign Interfaces\n");
                 fprintf(stdout,"2) Set interface(s) IP address\n");
                 fprintf(stdout,"3) Reboot system\n");
@@ -707,18 +820,34 @@ void FOS_DisplayLANConfigurationMenu(){
                         case 1:
 
                                 snprintf(script_filepath,100,"%s","/etc/rc.initial.setports");
-                                execlp("/usr/local/bin/php","php",script_filepath,(char*)0);
+                                FOS_PHP_run_script(script_filepath);
                         break;
                         case 2:
                                 snprintf(script_filepath,100,"%s","/etc/rc.initial.setlanip");
-                                execlp("/usr/local/bin/php","php",script_filepath,(char*)0);
+                                FOS_PHP_run_script(script_filepath);
                         break;
                         case 3:
                                 snprintf(script_filepath,100,"%s","/etc/rc.initial.reboot");
-                                execlp("/usr/local/bin/php","php",script_filepath,(char*)0);
+                                FOS_PHP_run_script(script_filepath);
                         break;
                         case 4:
                                 return;
                 }
         }
+}
+int FOS_PHP_run_script(const char* script_filepath){
+    pid_t pid;
+    int status;
+    pid = fork();
+    if (pid == 0) {
+        execlp("/usr/local/bin/php", "php", script_filepath, NULL);
+        perror("execlp");
+        return -1;
+    }else if(pid < 0) {
+        perror("fork");
+        return -1;
+    }else{
+        waitpid(pid, &status, 0);
+    }
+    return 1;
 }
