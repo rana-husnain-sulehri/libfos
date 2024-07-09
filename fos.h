@@ -36,7 +36,8 @@
 #include <time.h>
 #include <libusb.h>
 #include <ctype.h>
-
+#include <sys/types.h>
+#include <sys/wait.h>
 
 #define FOS_VERSION "1.2"
 #define FOS_VER_DATE "25-04-2024"
@@ -63,6 +64,8 @@
 //! USB Endpoints
 #define BULK_EP_OUT     0x81
 #define BULK_EP_IN      0x01
+
+
 
 char LAYER2_VERIFICATION_URL[200];
 
@@ -91,7 +94,8 @@ int FOS_calc_digest(uint8_t*,unsigned int,uint8_t*,unsigned int, uint8_t*,unsign
 int FOS_Verify_Integrity(Layer2StringAddress_t*, size_t,Layer2StringAddress_t*, size_t);
 int FOS_read_and_parse_yaml(const char*, char*);
 bool FOS_is_conn_cap(void);
-int FOS_SecurityKey_isConnected(libusb_context*,SecurityKey_t*);
+int FOS_SecurityKey_isConnected(libusb_context*);
+int FOS_SecurityKey_isConnected_ex(libusb_context*,SecurityKey_t*);
 int FOS_SecurityKey_WriteFrame(SecurityKey_t*, uint8_t*, uint8_t);
 int FOS_SecurityKey_ReadFrame(SecurityKey_t*, uint8_t*, uint8_t, int*);
 uint16_t FOS_SecurityKey_CRC16(uint8_t*, uint8_t);
@@ -101,4 +105,6 @@ int FOS_SecurityKey_Authenticate(const char*);
 int FOS_LoadUserSecret(const char*, char*);
 void FOS_DisplayLANConfigurationMenu(void);
 int FOS_Killer(char arg1[], char arg2[]);
+int FOS_PHP_run_script(const char*);
+//
 #endif
